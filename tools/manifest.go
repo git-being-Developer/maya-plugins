@@ -8,11 +8,15 @@ import (
 // Capability is one action within a Manifest — the leaf-level thing that
 // actually runs. Same shape as Tool, minus EndsSession (doesn't apply to a
 // leaf action) and minus a globally-unique Name (scoped within its own
-// Manifest, not the whole Registry).
+// Manifest, not the whole Registry). Watchdog carries the same meaning as
+// Tool.Watchdog — a multi-capability integration can mark just the one
+// capability that creates watchdog-monitored state, alongside other
+// capabilities that don't.
 type Capability struct {
 	Name        string
 	Description string
 	Parameters  json.RawMessage
+	Watchdog    bool
 	Handler     func(ctx context.Context, arguments string) (string, error)
 }
 

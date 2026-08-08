@@ -15,11 +15,20 @@ import (
 // Tool is a server-side action the model can invoke mid-conversation.
 // EndsSession marks a tool (like an end-the-call action) whose call should
 // close the voice session once its resulting reply finishes playing.
+//
+// Watchdog marks that calling this tool creates state a Watchdog
+// implementation elsewhere periodically checks for something to
+// proactively announce (a reminder's due time, say) — internal routing
+// metadata only, never part of what Definitions() shows the model. A
+// Watchdog: true tool is expected to have a corresponding Watchdog
+// registered with an Announcer; Go can't enforce that pairing at compile
+// time, so it's a documented convention, not a guarantee.
 type Tool struct {
 	Name        string
 	Description string
 	Parameters  json.RawMessage
 	EndsSession bool
+	Watchdog    bool
 	Handler     func(ctx context.Context, arguments string) (string, error)
 }
 

@@ -107,6 +107,48 @@ per stage. Maya's own default is a single small OpenAI text call
 requires OpenAI specifically — a smaller or local model can implement the
 same signature.
 
+## Proactive tools: `Watchdog` + `Announcer`
+
+Every `Tool`/`Capability` above is pull-only — the model calls it, it
+returns, done. Some things need the other direction: a reminder whose
+time has come, a price alert, anything that should reach the user
+without them opening a session first. `Tool` and `Capability` both carry
+a `Watchdog bool` field for this — internal routing metadata only, never
+part of what `Definitions()` shows the model. A `Watchdog: true` tool is
+expected to also implement:
+
+```go
+type Watchdog interface {
+    Check(ctx context.Context) ([]AnnouncementRequest, error)
+}
+```
+
+`Check` must return **only** items that are already due — not upcoming
+ones. `Announcer` is the one shared polling engine every `Watchdog`
+registers with, and it's deliberately stateless between polls: a
+`Watchdog` is responsible for self-filtering (comparing its own stored
+due time against `time.Now()`) and for not reporting the same thing
+again once it's been included in a returned batch — e.g. by deleting its
+own backing record. Holding a not-yet-due item inside `Announcer` itself
+across polls would risk it being reported by the `Watchdog` *and* still
+pending in `Announcer` on the same tick, so `Announcer` just doesn't try:
+
+```go
+announcer := tools.NewAnnouncer(30*time.Second, remindersTool, priceAlertTool)
+go announcer.Run(ctx)
+for req := range announcer.Subscribe() {
+    // deliver req.Text however the host application reaches the user
+}
+```
+
+This repo has no host application wired to actually *deliver* an
+`AnnouncementRequest` (that's Maya's job — opening a voice session and
+having it speak, in Maya's own repo, not here). A `Watchdog`-backed tool
+built here should still store its own due-time state the same way as any
+other tool state — via `Memory`, e.g. a small JSON blob per entry keyed by
+whatever it needs to look itself up later — rather than inventing a
+separate storage mechanism just for scheduling.
+
 ## Giving a tool its own memory
 
 Maya's shared/general memory (name, birthday, preferences, reminders —
