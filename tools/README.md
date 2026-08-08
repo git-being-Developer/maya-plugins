@@ -149,6 +149,47 @@ other tool state — via `Memory`, e.g. a small JSON blob per entry keyed by
 whatever it needs to look itself up later — rather than inventing a
 separate storage mechanism just for scheduling.
 
+## Showing something visual: `Display`
+
+A spoken reply is a bad fit for some results — a list of 8 restaurants
+read aloud is unusable. `WithDisplay`/`PushDisplay`/`CloseDisplay`
+(`tools/display.go`) let a `Handler` show something on the dashboard
+alongside its spoken reply, entirely via `context.Context` — no changes
+to `Tool`/`Capability`/`Registry`/`Manifest` needed:
+
+```go
+func (s *Weather) handleForecast(ctx context.Context, arguments string) (string, error) {
+    days := s.forecast(ctx, ...)
+
+    var body strings.Builder
+    for _, d := range days {
+        fmt.Fprintf(&body, "- **%s** — %s, %d°C\n", d.Day, d.Condition, d.Temp)
+    }
+    tools.PushDisplay(ctx, tools.DisplayRequest{
+        Title: "5-day forecast",
+        Body:  body.String(), // markdown — headers, bold/italic, bullet lists, images, links
+    })
+
+    return "Here's the forecast.", nil
+}
+```
+
+Deliberately generic: `DisplayRequest` is just a title and a markdown
+body — the contract has no idea whether a tool is showing a list, a
+table, an image, or a paragraph, and never needs a new field when the
+next tool wants to show something shaped differently than the last one.
+A `Handler` invoked without `WithDisplay` set up (e.g. directly in a
+test, the same way `memorytest` lets you test without Maya's real store)
+makes `PushDisplay`/`CloseDisplay` silent no-ops, not a panic.
+
+This repo has no host application wired to actually *render* a
+`DisplayRequest` (that's Maya's job, in its own repo) — same relationship
+as `Watchdog`/`Announcer` above. Closing what's shown is explicit, the
+same way `end_conversation` explicitly closes a session rather than
+relying on a timeout: Maya's own `close_display` is a general system
+tool, not tied to whichever tool showed something, that calls
+`CloseDisplay(ctx)`.
+
 ## Giving a tool its own memory
 
 Maya's shared/general memory (name, birthday, preferences, reminders —
