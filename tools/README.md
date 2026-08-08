@@ -48,6 +48,65 @@ picks up merged PRs here and syncs them into Maya on a release cadence, but
 that's a later phase. Until it exists, using a tool built here means Maya
 adding this repo as a `go.mod` dependency and importing it explicitly.
 
+## `Tool` vs `Manifest`: one action, or several related ones
+
+A realtime voice session sees every registered `Tool` as its own top-level
+function definition. That's fine for a handful — but an integration like
+Gmail naturally has several actions (summarize emails, send an email,
+schedule a meeting), and registering each as its own top-level `Tool`
+means the model has to pick the right one out of an ever-growing flat
+list as more integrations get added. Past a certain point that hurts
+selection accuracy, not just payload size.
+
+If your tool is genuinely **one action** — `weather/weather.go`, one
+`Tool` — nothing changes, use `Registry.Register` as above.
+
+If it's **several related actions under one integration**, group them as
+a `Manifest` instead:
+
+```go
+type Manifest struct {
+    Name         string
+    Description  string
+    Capabilities []Capability // Name, Description, Parameters, Handler — same shape as Tool
+}
+```
+
+A `Manifest` is never registered directly on a `Registry` — it's handed to
+a `Router`, which fronts *every* manifest behind a single dispatcher tool
+that the model actually sees. When the model calls the dispatcher with a
+plain-language request, the `Router` resolves it in two classification
+calls — "which manifest?" then "which capability within it?" — and calls
+that `Capability`'s `Handler` directly:
+
+```go
+router := tools.NewRouter(classify, gmailManifest, upiManifest, calendarManifest)
+
+registry.Register(tools.Tool{
+    Name:        "run_task",
+    Description: "Handle anything involving a connected integration — describe the request in plain language.",
+    Handler: func(ctx context.Context, arguments string) (string, error) {
+        var args struct{ Request string `json:"request"` }
+        json.Unmarshal([]byte(arguments), &args)
+        return router.Resolve(ctx, args.Request)
+    },
+})
+```
+
+This is what keeps the realtime tool list a small, fixed size no matter
+how many manifests or capabilities exist — it grows with *fixed built-ins
++ 1 dispatcher*, never with the number of integrations. `Resolve` returns
+a plain "nothing available for that" result (not an error) when nothing
+matches confidently at either stage, and short-circuits with zero
+classify calls at all when no manifests are registered.
+
+`classify` (type `Classify`) is pluggable — it's just
+`func(ctx, request string, options []Option) (string, error)`, one call
+per stage. Maya's own default is a single small OpenAI text call
+(`internal/realtime/router.go`, not part of this repo), but nothing here
+requires OpenAI specifically — a smaller or local model can implement the
+same signature.
+
 ## Giving a tool its own memory
 
 Maya's shared/general memory (name, birthday, preferences, reminders —
